@@ -1,0 +1,64 @@
+version: '3'
+services:
+  redis:
+    image: redis:latest
+    container_name: redis-test
+    ports:
+      - "6379:6379"
+    restart: always
+    networks:
+      - my_network
+
+  db:
+    image: postgres:13
+    restart: always
+    container_name: db
+    volumes:
+      - $HOME/postgresql/data:/var/lib/postgresql/data
+
+    ports:
+      - '5432:5432'
+    environment:
+      - POSTGRES_USER=auth_sprint
+      - POSTGRES_PASSWORD=auth_sprint
+      - POSTGRES_DB=auth_sprint
+    networks:
+      - my_network
+
+  api:
+    build:
+      context: ../../
+      dockerfile: Dockerfile
+    image: api
+    container_name: api
+    expose:
+      - 5000
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - db
+    restart: always
+    networks:
+      - my_network
+
+  tests:
+    image: api
+    container_name: tests
+    entrypoint: >
+      sh -c "pwd && ls && pip install --upgrade pip && pip install -r /usr/src/app/tests/functional/requirements.txt
+      && pytest /usr/src/app/tests/functional"
+    depends_on:
+      - api
+      - db
+    env_file:
+      - .env
+    expose:
+      - 5000
+    networks:
+      - my_network
+
+
+networks:
+  my_network:
+    driver: bridge

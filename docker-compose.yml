@@ -1,0 +1,118 @@
+version: '3'
+services:
+  redis:
+    image: redis:latest
+    container_name: redis-test
+    ports:
+      - ${REDIS_PORT}:6379
+    restart: always
+    networks:
+      - my_network
+
+  db:
+    image: postgres:13
+    restart: always
+    container_name: db
+    volumes:
+      - $HOME/postgresql/data:/var/lib/postgresql/data
+
+    ports:
+      - '5432:5432'
+    environment:
+      - POSTGRES_USER=auth_sprint
+      - POSTGRES_PASSWORD=auth_sprint
+      - POSTGRES_DB=auth_sprint
+    networks:
+      - my_network
+
+  api:
+    build:
+      context: auth
+      dockerfile: Dockerfile
+    image: api
+    container_name: api
+    ports:
+      - '5000:5000'
+    env_file:
+      - auth/.env
+    depends_on:
+      - redis
+      - db
+    restart: always
+    networks:
+      - my_network
+
+  app:
+    build:
+      context: movies/src
+      dockerfile: Dockerfile_app
+
+    image: app
+    restart: unless-stopped
+    container_name: app
+    command: gunicorn --workers=3 -b 0.0.0.0:8000 -k uvicorn.workers.UvicornWorker main:app
+    environment:
+      - REDIS_HOST=redis
+      - ELASTIC_HOST=elastics
+
+    depends_on:
+      - elastics
+      - redis
+    ports:
+      - "8000:8000"
+    networks:
+      - my_network
+
+  nginx:
+    build: nginx
+    container_name: nginx
+    volumes:
+      - static:/api/web/staticfiles/
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+      - app
+    networks:
+      - my_network
+
+  jaeger:
+    image: jaegertracing/all-in-one
+    ports:
+      - '6831:6831/udp'
+      - '16686:16686'
+    depends_on:
+      - nginx
+    networks:
+      - my_network
+
+  elastics:
+    image: docker.io/library/elasticsearch:7.8.0
+    container_name: elasticsearch_prod
+    env_file:
+      - movies/src/.env
+    ports:
+      - ${ELASTIC_PORT}:9200
+    environment:
+      - discovery.type=single-node
+    networks:
+      - my_network
+
+  etl:
+    build:
+      context: movies/ETL
+    command: python etl_process.py
+    container_name: etl_prod
+    depends_on:
+      - elastics
+      - db
+    env_file: movies/ETL/.env
+    networks:
+      - my_network
+
+networks:
+  my_network:
+    driver: bridge
+
+volumes:
+  static:
